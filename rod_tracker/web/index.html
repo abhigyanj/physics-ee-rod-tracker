@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rod tracking review</title>
+<style>
+body{font:16px system-ui,sans-serif;max-width:1050px;margin:24px auto;padding:0 18px;color:#222;background:#fafafa}
+h1{font-size:24px}button,select,input{font:inherit}button,select{padding:7px 10px;margin:4px 6px 4px 0}
+main{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}img{width:auto;max-width:100%;height:min(70vh,760px);object-fit:contain;background:#e6e6e6}
+section{flex:1;min-width:270px}#slider{width:100%}#status{min-height:24px}small{color:#555}a{color:#0759a5}#download[hidden]{display:none}
+</style>
+<h1>Rod tracking review</h1>
+<p>Export time and angular displacement. Calculate angular velocity and make graphs in Excel.</p>
+<select id="clip" aria-label="Trial and frequency"></select><button id="track">Track clip</button>
+<p id="status" role="status">Loading clips…</p>
+<main>
+<img id="frame" alt="Source video frame with rod overlay" hidden>
+<section>
+<p><label><input id="overlay" type="checkbox" checked> Show rod overlay</label></p>
+<p id="readout">No tracking loaded.</p>
+<p id="uncertainty"></p>
+<input id="slider" aria-label="Video frame" type="range" min="0" max="0" value="0" disabled>
+<div><button id="back" disabled>Previous frame</button><button id="play" disabled>Play</button><button id="next" disabled>Next frame</button></div>
+<p id="flag"></p>
+<p><a id="download" href="/data.csv" download="tracking.csv" hidden>Download time and angle CSV</a></p>
+<p><a id="fitDownload" href="/uncertainty.json" download hidden>Download mask-fit uncertainty report</a></p>
+<small>The red line is the tracked rod axis; orange flags a frame for review. Confidence shown on the image is a signal check, not an accuracy percentage.</small>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);let rows=0,playing=false,loading=false,readyKey=null;
+async function json(url,options){const response=await fetch(url,options);const value=await response.json();if(!response.ok)throw Error(value.error||response.status);return value}
+async function show(){if(loading||!rows)return;loading=true;try{const index=Number($('slider').value);const row=await json('/api/row?row='+index);$('readout').textContent=`Frame ${index+1} / ${rows} · ${row.time.toFixed(4)} s · ${row.angle.toFixed(1)}°`;$('uncertainty').textContent=row.fitStdDeg===null?'Mask-fit uncertainty unavailable.':`Mask-fit displacement standard uncertainty: ${row.fitStdDeg.toFixed(3)}° (1σ; fit precision only).`;$('flag').textContent=(row.flagged?'Flagged: inspect this frame against the rod. ':'')+(row.fitDifferenceDeg===null?'':`Mask-fit / tracked-axis difference: ${row.fitDifferenceDeg.toFixed(3)}°.`);const blob=await(await fetch('/api/frame?row='+index+'&overlay='+($('overlay').checked?'1':'0'))).blob();const url=URL.createObjectURL(blob);const image=$('frame');await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;image.src=url;image.hidden=false});URL.revokeObjectURL(url)}catch(error){$('status').textContent=error.message;playing=false}finally{loading=false}}
+async function step(amount){if(loading)return;$('slider').value=Math.max(0,Math.min(rows-1,Number($('slider').value)+amount));await show()}
+async function play(){while(playing&&Number($('slider').value)<rows-1){await step(1);await new Promise(resolve=>setTimeout(resolve,33))}playing=false;$('play').textContent='Play'}
+$('slider').oninput=show;$('overlay').onchange=show;$('back').onclick=()=>step(-1);$('next').onclick=()=>step(1);
+$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'Pause':'Play';if(playing)play()};
+$('track').onclick=async()=>{try{playing=false;readyKey=null;await json('/api/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:$('clip').value})});rows=0;for(const id of ['slider','back','next','play'])$(id).disabled=true;$('download').hidden=true;$('fitDownload').hidden=true;$('uncertainty').textContent='';$('frame').hidden=true;$('play').textContent='Play'}catch(error){$('status').textContent=error.message}};
+async function poll(){try{const state=await json('/api/state');$('status').textContent=state.running?`${Math.round(state.progress*100)}% — ${state.message}`:state.message;$('track').disabled=state.running;if(state.rows&&readyKey!==state.key){readyKey=state.key;$('clip').value=state.key;rows=state.rows;$('slider').max=rows-1;$('slider').value=0;for(const id of ['slider','back','next','play'])$(id).disabled=false;$('download').hidden=false;$('download').download=state.csv;$('fitDownload').hidden=false;$('fitDownload').download=state.uncertainty;await show()}}catch(error){$('status').textContent=error.message}setTimeout(poll,1000)}
+(async()=>{const data=await json('/api/clips');for(const clip of data.clips){const option=document.createElement('option');option.value=clip.key;option.textContent=clip.label;$('clip').append(option)}poll()})().catch(error=>$('status').textContent=error.message);
+</script>
+</html>

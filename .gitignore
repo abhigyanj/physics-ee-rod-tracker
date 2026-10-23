@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+._*
+local/
+results/
+*.mov
+*.MOV
+*.mp4
+*.MP4
+*.xlsx
+*.log
+.env*
